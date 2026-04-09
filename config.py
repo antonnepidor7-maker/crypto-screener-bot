@@ -28,7 +28,7 @@ MIN_PRINT_USD = 100
 MIN_REPEATS = 5
 
 # Maximum time window to look for repeating pattern (seconds)
-MAX_WINDOW = 60
+MAX_WINDOW = 15
 
 # Quantity tolerance: relative (percentage) + absolute minimum
 TOLERANCE_REL = 0.10      # 10%
