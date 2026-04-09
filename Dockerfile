@@ -2,8 +2,10 @@ FROM python:3.12-slim
 
 WORKDIR /app
 
-# Install Xray
-RUN apt-get update && apt-get install -y --no-install-recommends curl unzip && \
+# Install system deps: Xray + matplotlib runtime libs
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        curl unzip \
+        libfreetype6 libpng16-16 fonts-dejavu-core && \
     curl -L -o /tmp/xray.zip https://github.com/XTLS/Xray-core/releases/latest/download/Xray-linux-64.zip && \
     unzip /tmp/xray.zip -d /usr/local/bin/ && \
     chmod +x /usr/local/bin/xray && \

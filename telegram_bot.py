@@ -14,6 +14,7 @@ import asyncio
 import time
 import secrets
 from config import TELEGRAM_BOT_TOKEN, AUTH_USERS
+from chart import generate_signal_chart
 
 API_BASE = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}"
 
@@ -190,15 +191,17 @@ class TelegramNotifier:
 
     async def send_alert(self, symbol: str, count: int, avg_qty: float,
                          avg_interval: float, first_price: float,
-                         strength: str, avg_usd: float):
-        """Send alert only to authorized chats."""
+                         strength: str, avg_usd: float,
+                         signal_time_sec: float):
+        """Send chart + text alert to authorized chats."""
         if not self._authorized_chats:
             print("[TG] No authorized chats. Alerts not sent.", flush=True)
             return
 
+        # ── Текст алерта (отдельным сообщением) ──
         qty_str = _format_qty(avg_qty)
         usd_str = _format_usd(avg_usd)
-        msg = (
+        text_msg = (
             f"{strength}\n"
             f"\n"
             f"📊 <b>Пара:</b> {symbol}\n"
@@ -209,25 +212,69 @@ class TelegramNotifier:
             f"⏱ <b>Интервал:</b> {avg_interval:.2f}с"
         )
 
+        # ── Генерируем график (в executor, чтобы не блочить event loop) ──
+        loop = asyncio.get_event_loop()
+        try:
+            chart_buf = await loop.run_in_executor(
+                None,
+                lambda: generate_signal_chart(
+                    symbol=symbol,
+                    signal_time_sec=signal_time_sec,
+                    first_price=first_price,
+                    strength=strength,
+                    avg_usd=avg_usd,
+                )
+            )
+        except Exception as e:
+            print(f"[TG] Chart generation failed: {e}", flush=True)
+            chart_buf = None
+
         for cid in list(self._authorized_chats):
             try:
-                url = f"{API_BASE}/sendMessage"
-                payload = {
-                    "chat_id": cid,
-                    "text": msg,
-                    "parse_mode": "HTML",
-                }
-                async with self._session.post(
-                    url, json=payload,
-                    timeout=aiohttp.ClientTimeout(total=10)
-                ) as resp:
-                    if resp.status != 200:
-                        body = await resp.text()
-                        print(f"[TG] Send error to {cid}: {body[:100]}", flush=True)
-                        # If bot was blocked, deauthorize
+                # 1) Отправляем фото с графиком
+                if chart_buf:
+                    chart_buf.seek(0)
+                    form = aiohttp.FormData()
+                    form.add_field("chat_id", str(cid))
+                    form.add_field("caption", f"📈 <b>{symbol}</b>")
+                    form.add_field("parse_mode", "HTML")
+                    form.add_field(
+                        "photo",
+                        chart_buf,
+                        filename=f"{symbol}_signal.png",
+                        content_type="image/png",
+                    )
+                    async with self._session.post(
+                        f"{API_BASE}/sendPhoto",
+                        data=form,
+                        timeout=aiohttp.ClientTimeout(total=30)
+                    ) as resp:
                         if resp.status == 403:
                             self._authorized_chats.discard(cid)
                             self._auth_states[cid] = _STATE_NONE
+                            continue
+                        elif resp.status != 200:
+                            body = await resp.text()
+                            print(f"[TG] Photo error to {cid}: {body[:200]}", flush=True)
+
+                # 2) Отправляем текст с деталями
+                payload = {
+                    "chat_id": cid,
+                    "text": text_msg,
+                    "parse_mode": "HTML",
+                }
+                async with self._session.post(
+                    f"{API_BASE}/sendMessage",
+                    json=payload,
+                    timeout=aiohttp.ClientTimeout(total=10)
+                ) as resp:
+                    if resp.status == 403:
+                        self._authorized_chats.discard(cid)
+                        self._auth_states[cid] = _STATE_NONE
+                    elif resp.status != 200:
+                        body = await resp.text()
+                        print(f"[TG] Text error to {cid}: {body[:100]}", flush=True)
+
             except Exception as e:
                 print(f"[TG] Send error to {cid}: {type(e).__name__}: {e}", flush=True)
 

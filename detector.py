@@ -83,7 +83,7 @@ class Detector:
             if result is None:
                 continue
 
-            count, avg_qty, avg_interval, first_price = result
+            count, avg_qty, avg_interval, first_price, first_time = result
             avg_usd = avg_qty * first_price
 
             if avg_usd < MIN_PRINT_USD:
@@ -104,12 +104,13 @@ class Detector:
             self._seen_clusters[sym].add(cluster_key)
             self._last_alert[sym] = time.time()
             self._alert_count += 1
-            self._fire_alert(sym, count, avg_qty, avg_interval, first_price, strength, avg_usd)
+            self._fire_alert(sym, count, avg_qty, avg_interval, first_price,
+                             strength, avg_usd, first_time)
             return
 
     def _fire_alert(self, sym: str, count: int, avg_qty: float,
                     avg_interval: float, first_price: float,
-                    strength: str, avg_usd: float):
+                    strength: str, avg_usd: float, signal_time_sec: float):
         ts = time.strftime("%H:%M:%S")
         qty_str = _format_qty(avg_qty)
         interval_str = f"{avg_interval:.2f}s"
@@ -124,6 +125,7 @@ class Detector:
             f"   Avg Size:  {qty_str}\n"
             f"   Avg $/pr:  {usd_str}\n"
             f"   Interval:  {interval_str}\n"
+            f"   Signal TS: {signal_time_sec}\n"
             f"{'='*50}",
             flush=True
         )
@@ -134,7 +136,8 @@ class Detector:
                 if loop.is_running():
                     loop.create_task(
                         self._on_alert(sym, count, avg_qty, avg_interval,
-                                       first_price, strength, avg_usd)
+                                       first_price, strength, avg_usd,
+                                       signal_time_sec)
                     )
             except Exception as e:
                 print(f"[TG] Alert error: {e}", flush=True)
@@ -214,11 +217,11 @@ class Detector:
             if abs(iv - median_iv) > max_drift:
                 return None
 
-        first_price = sorted_c[0][_PRICE]
+        first_time = sorted_c[0][_TS]
         avg_qty = sum(t[_QTY] for t in sorted_c) / n
         avg_iv = sum(intervals) / (n - 1)
 
-        return (n, avg_qty, avg_iv, first_price)
+        return (n, avg_qty, avg_iv, first_price, first_time)
 
 
 def _qty_match(q1: float, q2: float) -> bool:
