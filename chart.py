@@ -6,7 +6,7 @@ import requests
 from datetime import datetime, timezone
 from PIL import Image, ImageDraw, ImageFont
 
-from config import BINANCE_FAPI
+from config import BINANCE_FAPI, BINANCE_PROXY
 
 # ── Цвета ──
 BG       = (17, 17, 17)
@@ -37,6 +37,7 @@ def fetch_klines(symbol: str, signal_time_sec: float,
         f"{BINANCE_FAPI}/fapi/v1/klines",
         params={"symbol": symbol, "interval": "1m", "limit": total, "endTime": end_ms},
         timeout=10,
+        proxies={"http": BINANCE_PROXY, "https": BINANCE_PROXY},
     )
     resp.raise_for_status()
     raw = resp.json()
