@@ -54,7 +54,7 @@ MAX_STREAMS_PER_CONN = 1024
 # Cleanup & Memory
 # ========================
 
-TRADE_TTL = 90
+TRADE_TTL = 30
 CLEANUP_INTERVAL = 30
 
 # ========================
