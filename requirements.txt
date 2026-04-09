@@ -1,5 +1,4 @@
 aiohttp>=3.9
 aiohttp-socks>=0.8
-mplfinance>=0.12
-pandas>=2.0
+Pillow>=10.0
 requests>=2.31

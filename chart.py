@@ -1,23 +1,36 @@
 """
-chart.py — Генерация PNG-графика с отметкой включения алгоритма.
+chart.py — Быстрая генерация графика на Pillow (без matplotlib/pandas).
 """
-import matplotlib
-matplotlib.use("Agg")  # headless сервер — без GUI
-
 import io
-import time
-from datetime import datetime, timezone
-
-import mplfinance as mpf
-import pandas as pd
 import requests
+from datetime import datetime, timezone
+from PIL import Image, ImageDraw, ImageFont
 
 from config import BINANCE_FAPI
 
+# ── Цвета ──
+BG       = (17, 17, 17)
+UP       = (38, 166, 154)
+DOWN     = (239, 83, 80)
+GRID     = (40, 40, 40)
+TEXT     = (180, 180, 180)
+WHITE    = (255, 255, 255)
+GREEN    = (0, 255, 136)
+GOLD     = (255, 215, 0)
+GREEN_BG = (0, 255, 136, 40)
+
+# ── Размеры ──
+W, H         = 1200, 600
+PAD_LEFT     = 80
+PAD_RIGHT    = 20
+PAD_TOP      = 50
+PAD_BOTTOM   = 20
+VOL_H        = 80  # высота зоны объёма
+
 
 def fetch_klines(symbol: str, signal_time_sec: float,
-                 before: int = 60, after: int = 30) -> pd.DataFrame:
-    """Забираем 1m свечи: before до сигнала + after после."""
+                 before: int = 60, after: int = 30) -> list[dict]:
+    """Забираем 1m свечи с Binance Futures."""
     total = before + after
     end_ms = int((signal_time_sec + after * 60) * 1000)
 
@@ -27,18 +40,30 @@ def fetch_klines(symbol: str, signal_time_sec: float,
         timeout=10,
     )
     resp.raise_for_status()
-    klines = resp.json()
+    raw = resp.json()
 
-    df = pd.DataFrame(klines, columns=[
-        "open_time", "open", "high", "low", "close", "volume",
-        "close_time", "quote_vol", "trades", "taker_buy_base",
-        "taker_buy_quote", "ignore",
-    ])
-    df["open_time"] = pd.to_datetime(df["open_time"], unit="ms")
-    for col in ("open", "high", "low", "close", "volume"):
-        df[col] = df[col].astype(float)
-    df.set_index("open_time", inplace=True)
-    return df
+    klines = []
+    for k in raw:
+        klines.append({
+            "time":  k[0],
+            "open":  float(k[1]),
+            "high":  float(k[2]),
+            "low":   float(k[3]),
+            "close": float(k[4]),
+            "vol":   float(k[5]),
+        })
+    return klines
+
+
+def _format_price(p: float) -> str:
+    if p >= 1000:
+        return f"{p:,.2f}"
+    elif p >= 1:
+        return f"{p:.4f}"
+    elif p >= 0.001:
+        return f"{p:.6f}"
+    else:
+        return f"{p:.8f}"
 
 
 def generate_signal_chart(
@@ -47,89 +72,147 @@ def generate_signal_chart(
     first_price: float,
     strength: str,
     avg_usd: float,
-    dpi: int = 150,
+    dpi: int = 1,  # unused, kept for API compat
 ) -> io.BytesIO:
-    """
-    Генерирует тёмный график со стрелкой на сигнальной свече.
-    Возвращает BytesIO с PNG.
-    """
-    df = fetch_klines(symbol, signal_time_sec)
-
-    if df.empty:
+    """Генерирует PNG-график с отметкой включения. Возвращает BytesIO."""
+    klines = fetch_klines(symbol, signal_time_sec)
+    n = len(klines)
+    if n == 0:
         raise ValueError(f"No kline data for {symbol}")
 
-    # Ищем ближайшую свечу к моменту сигнала
-    signal_dt = datetime.fromtimestamp(signal_time_sec, tz=timezone.utc)
-    signal_idx = df.index.get_indexer([pd.Timestamp(signal_dt)], method="nearest")[0]
+    # ── Находим сигнальную свечу ──
+    signal_ms = int(signal_time_sec * 1000)
+    signal_idx = 0
+    best_diff = abs(klines[0]["time"] - signal_ms)
+    for i, k in enumerate(klines):
+        diff = abs(k["time"] - signal_ms)
+        if diff < best_diff:
+            best_diff = diff
+            signal_idx = i
 
-    # ── Стрелка вниз (под свечой) ──
-    marker = [float("nan")] * len(df)
-    marker[signal_idx] = df["low"].iloc[signal_idx] * 0.9995
+    # ── Диапазон цен ──
+    all_high = max(k["high"] for k in klines)
+    all_low  = min(k["low"]  for k in klines)
+    price_range = all_high - all_low
+    if price_range == 0:
+        price_range = all_high * 0.01
+    padding = price_range * 0.05
+    pmin = all_low - padding
+    pmax = all_high + padding
 
-    arrow = mpf.make_addplot(
-        marker,
-        type="scatter",
-        marker="^",
-        markersize=180,
-        color="#00ff88",
-        edgecolors="white",
-        linewidths=0.8,
+    # ── Диапазон объёма ──
+    max_vol = max(k["vol"] for k in klines) or 1
+
+    # ── Зоны графика ──
+    chart_top = PAD_TOP
+    chart_bot = H - PAD_BOTTOM - VOL_H
+    chart_h = chart_bot - chart_top
+    vol_top = chart_bot + 4
+    vol_bot = H - PAD_BOTTOM
+    vol_h = vol_bot - vol_top
+    candle_area_w = W - PAD_LEFT - PAD_RIGHT
+    candle_w = max(2, candle_area_w // n - 1)
+
+    def price_y(p: float) -> int:
+        return int(chart_top + (pmax - p) / (pmax - pmin) * chart_h)
+
+    def candle_x(i: int) -> int:
+        return PAD_LEFT + int((i + 0.5) * candle_area_w / n)
+
+    # ── Рисуем ──
+    img = Image.new("RGB", (W, H), BG)
+    draw = ImageDraw.Draw(img)
+
+    # Шрифт (fallback на default)
+    try:
+        font_sm = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", 12)
+        font_md = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", 14)
+        font_lg = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", 16)
+    except OSError:
+        font_sm = ImageFont.load_default()
+        font_md = font_sm
+        font_lg = font_sm
+
+    # ── Сетка по цене ──
+    num_grid = 5
+    for i in range(num_grid + 1):
+        p = pmin + (pmax - pmin) * i / num_grid
+        y = price_y(p)
+        draw.line([(PAD_LEFT, y), (W - PAD_RIGHT, y)], fill=GRID, width=1)
+        label = _format_price(p)
+        draw.text((4, y - 6), label, fill=TEXT, font=font_sm)
+
+    # ── Свечи + объём ──
+    for i, k in enumerate(klines):
+        x = candle_x(i)
+        o, h, l, c, v = k["open"], k["high"], k["low"], k["close"], k["vol"]
+        color = UP if c >= o else DOWN
+
+        # Wick
+        draw.line([(x, price_y(h)), (x, price_y(l))], fill=color, width=1)
+
+        # Body
+        y_open = price_y(o)
+        y_close = price_y(c)
+        y_top = min(y_open, y_close)
+        y_bot = max(y_open, y_close)
+        if y_bot - y_top < 1:
+            y_bot = y_top + 1
+        draw.rectangle(
+            [(x - candle_w // 2, y_top), (x + candle_w // 2, y_bot)],
+            fill=color,
+        )
+
+        # Volume bar
+        vh = int(v / max_vol * vol_h)
+        draw.rectangle(
+            [(x - candle_w // 2, vol_bot - vh), (x + candle_w // 2, vol_bot)],
+            fill=(*color, 120) if len(color) == 3 else color,
+        )
+
+    # ── Подсветка момента сигнала (вертикальная полоса) ──
+    sx = candle_x(signal_idx)
+    overlay = Image.new("RGBA", (W, H), (0, 0, 0, 0))
+    odraw = ImageDraw.Draw(overlay)
+    band_w = candle_w * 3
+    odraw.rectangle(
+        [(sx - band_w, chart_top), (sx + band_w, vol_bot)],
+        fill=(0, 255, 136, 35),
     )
-
-    # ── Вертикальная подсветка момента ──
-    vlines = dict(
-        vlines=[df.index[signal_idx]],
-        linewidths=3,
-        colors="#00ff8840",
-    )
+    img = Image.alpha_composite(img.convert("RGBA"), overlay).convert("RGB")
+    draw = ImageDraw.Draw(img)
 
     # ── Линия entry price ──
-    hlines = dict(
-        hlines=[first_price],
-        colors="#FFD700",
-        linestyle="--",
-        linewidths=1.2,
-    )
+    ey = price_y(first_price)
+    # Пунктир
+    for dx in range(PAD_LEFT, W - PAD_RIGHT, 8):
+        draw.line([(dx, ey), (dx + 4, ey)], fill=GOLD, width=1)
+    draw.text((W - PAD_RIGHT - 80, ey - 14), _format_price(first_price), fill=GOLD, font=font_sm)
 
-    # ── Тёмный стиль ──
-    mc = mpf.make_marketcolors(
-        up="#26a69a", down="#ef5350",
-        edge="inherit", wick="inherit",
-        volume="#555555",
-    )
-    style = mpf.make_mpf_style(
-        marketcolors=mc,
-        gridstyle=":",
-        gridcolor="#333333",
-        facecolor="#111111",
-        figcolor="#111111",
-        rc={
-            "text.color": "white",
-            "axes.labelcolor": "white",
-            "xtick.color": "#888888",
-            "ytick.color": "#888888",
-        },
+    # ── Стрелка ▲ под сигнальной свечой ──
+    arrow_y = price_y(klines[signal_idx]["low"]) + 10
+    arrow_size = 10
+    draw.polygon(
+        [
+            (sx, arrow_y + arrow_size),
+            (sx - arrow_size, arrow_y - arrow_size // 2),
+            (sx + arrow_size, arrow_y - arrow_size // 2),
+        ],
+        fill=GREEN,
     )
 
     # ── Заголовок ──
+    signal_dt = datetime.fromtimestamp(signal_time_sec, tz=timezone.utc)
     ts_str = signal_dt.strftime("%Y-%m-%d %H:%M UTC")
     usd_label = f"${avg_usd:,.0f}" if avg_usd < 1000 else f"${avg_usd / 1000:.1f}K"
-    title = f"{symbol}  •  {strength}  •  {ts_str}\nEntry: {first_price}  |  Print: {usd_label}"
+    title = f"{symbol}  •  {strength}  •  {ts_str}"
+    subtitle = f"Entry: {_format_price(first_price)}  |  Print: {usd_label}"
 
-    # ── Рендер ──
+    draw.text((PAD_LEFT, 8), title, fill=WHITE, font=font_lg)
+    draw.text((PAD_LEFT, 28), subtitle, fill=TEXT, font=font_md)
+
+    # ── Сохраняем в BytesIO ──
     buf = io.BytesIO()
-    mpf.plot(
-        df,
-        type="candle",
-        style=style,
-        volume=True,
-        addplot=arrow,
-        vlines=vlines,
-        hlines=hlines,
-        title=title,
-        figsize=(12, 6),
-        tight_layout=True,
-        savefig=dict(fname=buf, dpi=dpi, bbox_inches="tight", facecolor="#111111"),
-    )
+    img.save(buf, format="PNG", optimize=True)
     buf.seek(0)
     return buf
