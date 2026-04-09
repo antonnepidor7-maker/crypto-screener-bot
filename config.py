@@ -44,6 +44,9 @@ INTERVAL_DRIFT = 0.25  # 25%
 BINANCE_WS_BASE = "wss://fstream.binance.com/ws"
 BINANCE_FAPI = "https://fapi.binance.com"
 
+# Local Xray SOCKS5 proxy (bypasses Binance geo-block)
+BINANCE_PROXY = "socks5://127.0.0.1:10808"
+
 # Max symbols per WebSocket connection
 MAX_STREAMS_PER_CONN = 1024
 

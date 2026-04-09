@@ -7,7 +7,16 @@ import aiohttp
 import asyncio
 from config import (
     BINANCE_FAPI, STABLECOINS, HEAVY_COINS, MIN_24H_VOLUME,
+    BINANCE_PROXY,
 )
+
+
+def _make_connector():
+    """Create aiohttp connector, optionally via SOCKS proxy."""
+    if BINANCE_PROXY:
+        from aiohttp_socks import ProxyConnector
+        return ProxyConnector.from_url(BINANCE_PROXY)
+    return None
 
 
 _DIR = os.path.dirname(os.path.abspath(__file__))
@@ -35,7 +44,8 @@ async def get_filtered_symbols() -> list[str]:
 
     url = f"{BINANCE_FAPI}/fapi/v1/ticker/24hr"
 
-    async with aiohttp.ClientSession() as session:
+    connector = _make_connector()
+    async with aiohttp.ClientSession(connector=connector) as session:
         async with session.get(url) as resp:
             if resp.status != 200:
                 raise RuntimeError(f"Binance API error: {resp.status}")

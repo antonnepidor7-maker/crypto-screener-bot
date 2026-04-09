@@ -6,7 +6,15 @@ import asyncio
 import json
 import time
 import aiohttp
-from config import BINANCE_WS_BASE, MAX_STREAMS_PER_CONN
+from config import BINANCE_WS_BASE, MAX_STREAMS_PER_CONN, BINANCE_PROXY
+
+
+def _make_connector():
+    """Create aiohttp connector, optionally via SOCKS proxy."""
+    if BINANCE_PROXY:
+        from aiohttp_socks import ProxyConnector
+        return ProxyConnector.from_url(BINANCE_PROXY)
+    return None
 
 
 class WSManager:
@@ -20,7 +28,6 @@ class WSManager:
         """Launch WebSocket connections for all symbols."""
         self._running = True
 
-        # Split symbols into chunks of MAX_STREAMS_PER_CONN
         chunks = [
             self.symbols[i:i + MAX_STREAMS_PER_CONN]
             for i in range(0, len(self.symbols), MAX_STREAMS_PER_CONN)
@@ -53,7 +60,8 @@ class WSManager:
 
         while self._running:
             try:
-                async with aiohttp.ClientSession() as session:
+                connector = _make_connector()
+                async with aiohttp.ClientSession(connector=connector) as session:
                     async with session.ws_connect(url, heartbeat=30) as ws:
                         print(f"[WS-{conn_id}] Connected ({len(symbols)} streams)")
 
@@ -83,7 +91,6 @@ class WSManager:
           s = symbol, p = price, q = quantity,
           m = true if buyer is maker (SELL), false if buyer is taker (BUY)
         """
-        # m=False means market BUY (buyer is taker)
         is_buy = data.get("m") is False
         if not is_buy:
             return
@@ -92,8 +99,8 @@ class WSManager:
             "symbol": data["s"],
             "price": float(data["p"]),
             "qty": float(data["q"]),
-            "time": data["T"],       # trade time (ms)
-            "event_time": data["E"], # event time (ms)
+            "time": data["T"],
+            "event_time": data["E"],
         }
 
         self.on_trade(trade)
