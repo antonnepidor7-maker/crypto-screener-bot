@@ -40,7 +40,7 @@ class TelegramNotifier:
         self._last_discovery = 0
 
     async def start(self):
-        timeout = aiohttp.ClientTimeout(total=10)
+        timeout = aiohttp.ClientTimeout(total=60, sock_connect=10)
         self._session = aiohttp.ClientSession(timeout=timeout)
 
     async def stop(self):
@@ -109,6 +109,28 @@ class TelegramNotifier:
                 )
             else:
                 await self._send_message(chat_id, "❌ Не авторизован.\n/start — войти.")
+            return
+
+        # /test — send a test alert
+        if text == "/test":
+            if state != _STATE_AUTHORIZED:
+                await self._send_message(chat_id, "❌ Не авторизован.\n/start — войти.")
+                return
+            await self._send_message(chat_id, "🧪 Отправляю тестовый алерт...")
+            try:
+                await self.send_alert(
+                    symbol="BTCUSDT",
+                    count=5,
+                    avg_qty=0.025,
+                    avg_interval=1.05,
+                    first_price=83500.0,
+                    strength="🟢 ТЕСТОВЫЙ АЛЕРТ",
+                    avg_usd=115.0,
+                    signal_time_sec=time.time(),
+                )
+                await self._send_message(chat_id, "✅ Тестовый алерт отправлен!")
+            except Exception as e:
+                await self._send_message(chat_id, f"❌ Ошибка: {type(e).__name__}: {e}")
             return
 
         # Auth flow: waiting for login

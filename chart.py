@@ -107,6 +107,7 @@ def generate_signal_chart(
     chart_top = PAD_TOP
     chart_bot = H - PAD_BOTTOM - VOL_H
     chart_h = chart_bot - chart_top
+    vol_top = chart_bot
     vol_bot = H - PAD_BOTTOM
     vol_h = vol_bot - vol_top
     candle_area_w = W - PAD_LEFT - PAD_RIGHT
