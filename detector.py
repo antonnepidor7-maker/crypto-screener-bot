@@ -218,6 +218,7 @@ class Detector:
                 return None
 
         first_time = sorted_c[0][_TS]
+        first_price = sorted_c[0][_PRICE]
         avg_qty = sum(t[_QTY] for t in sorted_c) / n
         avg_iv = sum(intervals) / (n - 1)
 
