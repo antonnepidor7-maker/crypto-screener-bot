@@ -17,7 +17,6 @@ TEXT     = (180, 180, 180)
 WHITE    = (255, 255, 255)
 GREEN    = (0, 255, 136)
 GOLD     = (255, 215, 0)
-GREEN_BG = (0, 255, 136, 40)
 
 # ── Размеры ──
 W, H         = 1200, 600
@@ -107,7 +106,6 @@ def generate_signal_chart(
     chart_top = PAD_TOP
     chart_bot = H - PAD_BOTTOM - VOL_H
     chart_h = chart_bot - chart_top
-    vol_top = chart_bot + 4
     vol_bot = H - PAD_BOTTOM
     vol_h = vol_bot - vol_top
     candle_area_w = W - PAD_LEFT - PAD_RIGHT
