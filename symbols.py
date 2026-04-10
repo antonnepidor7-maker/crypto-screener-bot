@@ -7,7 +7,7 @@ import aiohttp
 import asyncio
 from config import (
     BINANCE_FAPI, BINANCE_API, STABLECOINS, HEAVY_COINS,
-    MIN_24H_VOLUME, BINANCE_PROXY, MARKET_TYPE,
+    MIN_24H_VOLUME_FUTURES, MIN_24H_VOLUME_SPOT, BINANCE_PROXY, MARKET_TYPE,
 )
 
 
@@ -31,7 +31,7 @@ def _load_blacklist() -> set[str]:
     return set()
 
 
-def _filter_symbol(sym: str, blacklist: set[str], tickers_map: dict) -> bool:
+def _filter_symbol(sym: str, blacklist: set[str], tickers_map: dict, min_volume: float) -> bool:
     """Check if symbol passes all filters. Returns True if should include."""
     if not sym.endswith("USDT"):
         return False
@@ -52,7 +52,7 @@ def _filter_symbol(sym: str, blacklist: set[str], tickers_map: dict) -> bool:
     except (ValueError, TypeError):
         return False
 
-    return vol >= MIN_24H_VOLUME
+    return vol >= min_volume
 
 
 async def _fetch_futures_symbols(blacklist: set[str]) -> list[str]:
@@ -66,7 +66,7 @@ async def _fetch_futures_symbols(blacklist: set[str]) -> list[str]:
             tickers = await resp.json()
 
     tickers_map = {t["symbol"]: t for t in tickers}
-    symbols = [s for s in tickers_map if _filter_symbol(s, blacklist, tickers_map)]
+    symbols = [s for s in tickers_map if _filter_symbol(s, blacklist, tickers_map, MIN_24H_VOLUME_FUTURES)]
     symbols.sort()
     return symbols
 
@@ -82,7 +82,7 @@ async def _fetch_spot_symbols(blacklist: set[str]) -> list[str]:
             tickers = await resp.json()
 
     tickers_map = {t["symbol"]: t for t in tickers}
-    symbols = [s for s in tickers_map if _filter_symbol(s, blacklist, tickers_map)]
+    symbols = [s for s in tickers_map if _filter_symbol(s, blacklist, tickers_map, MIN_24H_VOLUME_SPOT)]
     symbols.sort()
     return symbols
 

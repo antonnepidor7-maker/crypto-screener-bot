@@ -14,8 +14,11 @@ STABLECOINS = {"USDT", "USDC", "BUSD", "DAI", "TUSD", "USDP", "FDUSD", "EUR"}
 # Exclude heavy coins (high price, dominant market - too noisy for this pattern)
 HEAVY_COINS = {"BTC", "ETH", "BNB"}
 
-# 24h quote volume threshold (USDT)
-MIN_24H_VOLUME = 10_000_000  # $10M
+# 24h quote volume threshold (USDT) — per market
+MIN_24H_VOLUME_FUTURES = 10_000_000  # $10M
+MIN_24H_VOLUME_SPOT = 5_000_000      # $5M
+# Legacy fallback
+MIN_24H_VOLUME = MIN_24H_VOLUME_FUTURES
 
 # Minimum dollar value per print to consider ($100)
 MIN_PRINT_USD = 100
