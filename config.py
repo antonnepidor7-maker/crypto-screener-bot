@@ -44,6 +44,26 @@ INTERVAL_DRIFT = 0.25  # 25%
 BINANCE_WS_BASE = "wss://fstream.binance.com/ws"
 BINANCE_FAPI = "https://fapi.binance.com"
 
+# Binance Spot endpoints
+BINANCE_SPOT_WS_BASE = "wss://stream.binance.com:9443/ws"
+BINANCE_API = "https://api.binance.com"
+
+# ========================
+# Market Type
+# ========================
+
+# Which markets to monitor: "futures", "spot", or "both"
+MARKET_TYPE = os.environ.get("MARKET_TYPE", "both").lower()
+
+# ========================
+# Alert Strength (interval-based)
+# ========================
+
+# Interval thresholds for alert strength classification (seconds)
+INTERVAL_STRONG_MAX = 0.5    # < 0.5s = STRONG
+INTERVAL_MEDIUM_MAX = 1.0    # 0.5s - 1.0s = MEDIUM
+# > 1.0s = WEAK
+
 # Local Xray SOCKS5 proxy (bypasses Binance geo-block)
 BINANCE_PROXY = "socks5://127.0.0.1:10808"
 

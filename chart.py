@@ -6,7 +6,7 @@ import requests
 from datetime import datetime, timezone
 from PIL import Image, ImageDraw, ImageFont
 
-from config import BINANCE_FAPI, BINANCE_PROXY
+from config import BINANCE_FAPI, BINANCE_API, BINANCE_PROXY
 
 # ── Цвета ──
 BG       = (17, 17, 17)
@@ -28,13 +28,19 @@ VOL_H        = 80  # высота зоны объёма
 
 
 def fetch_klines(symbol: str, signal_time_sec: float,
-                 before: int = 60, after: int = 30) -> list[dict]:
-    """Забираем 1m свечи с Binance Futures."""
+                 before: int = 60, after: int = 30,
+                 market: str = "futures") -> list[dict]:
+    """Забираем 1m свечи с Binance (Futures или Spot)."""
     total = before + after
     end_ms = int((signal_time_sec + after * 60) * 1000)
 
+    if market == "spot":
+        url = f"{BINANCE_API}/api/v3/klines"
+    else:
+        url = f"{BINANCE_FAPI}/fapi/v1/klines"
+
     resp = requests.get(
-        f"{BINANCE_FAPI}/fapi/v1/klines",
+        url,
         params={"symbol": symbol, "interval": "1m", "limit": total, "endTime": end_ms},
         timeout=10,
         proxies={"http": BINANCE_PROXY, "https": BINANCE_PROXY},
@@ -73,10 +79,11 @@ def generate_signal_chart(
     strength: str,
     avg_usd: float,
     side: str = "BUY",
+    market: str = "futures",
     dpi: int = 1,  # unused, kept for API compat
 ) -> io.BytesIO:
     """Генерирует PNG-график с отметкой включения. Возвращает BytesIO."""
-    klines = fetch_klines(symbol, signal_time_sec)
+    klines = fetch_klines(symbol, signal_time_sec, market=market)
     n = len(klines)
     if n == 0:
         raise ValueError(f"No kline data for {symbol}")
