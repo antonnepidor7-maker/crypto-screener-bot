@@ -116,19 +116,32 @@ class TelegramNotifier:
             if state != _STATE_AUTHORIZED:
                 await self._send_message(chat_id, "❌ Не авторизован.\n/start — войти.")
                 return
-            await self._send_message(chat_id, "🧪 Отправляю тестовый алерт...")
+            await self._send_message(chat_id, "🧪 Отправляю тестовые алерты (BUY + SELL)...")
             try:
                 await self.send_alert(
                     symbol="BTCUSDT",
+                    side="BUY",
                     count=5,
                     avg_qty=0.025,
                     avg_interval=1.05,
                     first_price=83500.0,
-                    strength="🟢 ТЕСТОВЫЙ АЛЕРТ",
+                    strength="🟢 ТЕСТОВЫЙ BUY",
                     avg_usd=115.0,
                     signal_time_sec=time.time(),
                 )
-                await self._send_message(chat_id, "✅ Тестовый алерт отправлен!")
+                await asyncio.sleep(1)
+                await self.send_alert(
+                    symbol="ETHUSDT",
+                    side="SELL",
+                    count=5,
+                    avg_qty=2.5,
+                    avg_interval=1.05,
+                    first_price=1850.0,
+                    strength="🔴 ТЕСТОВЫЙ SELL",
+                    avg_usd=115.0,
+                    signal_time_sec=time.time(),
+                )
+                await self._send_message(chat_id, "✅ Тестовые алерты отправлены!")
             except Exception as e:
                 await self._send_message(chat_id, f"❌ Ошибка: {type(e).__name__}: {e}")
             return
@@ -211,7 +224,7 @@ class TelegramNotifier:
         """Start the message polling loop. Returns an asyncio.Task."""
         return asyncio.create_task(self._poll_updates())
 
-    async def send_alert(self, symbol: str, count: int, avg_qty: float,
+    async def send_alert(self, symbol: str, side: str, count: int, avg_qty: float,
                          avg_interval: float, first_price: float,
                          strength: str, avg_usd: float,
                          signal_time_sec: float):
@@ -223,10 +236,12 @@ class TelegramNotifier:
         # ── Текст алерта (отдельным сообщением) ──
         qty_str = _format_qty(avg_qty)
         usd_str = _format_usd(avg_usd)
+        side_emoji = "🔴" if side == "SELL" else "🟢"
         text_msg = (
-            f"{strength}\n"
+            f"{side_emoji} {strength}\n"
             f"\n"
             f"📊 <b>Пара:</b> {symbol}\n"
+            f"📈 <b>Направление:</b> {side}\n"
             f"💰 <b>Цена:</b> {first_price}\n"
             f"🔄 <b>Принтов:</b> {count}\n"
             f"📦 <b>Размер:</b> {qty_str}\n"
@@ -245,6 +260,7 @@ class TelegramNotifier:
                     first_price=first_price,
                     strength=strength,
                     avg_usd=avg_usd,
+                    side=side,
                 )
             )
         except Exception as e:
@@ -256,9 +272,10 @@ class TelegramNotifier:
                 # 1) Отправляем фото с графиком
                 if chart_buf:
                     chart_buf.seek(0)
+                    caption_emoji = "🔴" if side == "SELL" else "🟢"
                     form = aiohttp.FormData()
                     form.add_field("chat_id", str(cid))
-                    form.add_field("caption", f"📈 <b>{symbol}</b>")
+                    form.add_field("caption", f"{caption_emoji} <b>{symbol}</b> • {side}")
                     form.add_field("parse_mode", "HTML")
                     form.add_field(
                         "photo",

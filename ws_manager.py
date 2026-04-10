@@ -91,9 +91,7 @@ class WSManager:
           s = symbol, p = price, q = quantity,
           m = true if buyer is maker (SELL), false if buyer is taker (BUY)
         """
-        is_buy = data.get("m") is False
-        if not is_buy:
-            return
+        side = "BUY" if data.get("m") is False else "SELL"
 
         trade = {
             "symbol": data["s"],
@@ -101,6 +99,7 @@ class WSManager:
             "qty": float(data["q"]),
             "time": data["T"],
             "event_time": data["E"],
+            "side": side,
         }
 
         self.on_trade(trade)

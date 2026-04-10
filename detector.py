@@ -1,5 +1,5 @@
 """
-Pattern detector: finds repeating market buys of the same volume.
+Pattern detector: finds repeating market buys and sells of the same volume.
 """
 import time
 import asyncio
@@ -10,13 +10,14 @@ from config import (
     INTERVAL_DRIFT, TRADE_TTL, ALERT_COOLDOWN, MIN_PRINT_USD,
 )
 
-# Trade tuple layout: (qty, ts, price)
-_QTY, _TS, _PRICE = 0, 1, 2
+# Trade tuple layout: (qty, ts, price, side)
+_QTY, _TS, _PRICE, _SIDE = 0, 1, 2, 3
 
 
 class Detector:
     def __init__(self, on_alert=None):
-        self._trades: dict[str, list[tuple]] = defaultdict(list)
+        # Separate buffers per (symbol, side)
+        self._trades: dict[str, dict[str, list[tuple]]] = defaultdict(lambda: {"BUY": [], "SELL": []})
         self._last_alert: dict[str, float] = {}
         self._seen_clusters: dict[str, set] = defaultdict(set)
         self._on_alert = on_alert
@@ -25,50 +26,54 @@ class Detector:
 
     def on_trade(self, trade: dict):
         sym = trade["symbol"]
+        side = trade.get("side", "BUY")
         self._trade_count += 1
 
         # Store as tuple — no dict overhead
-        self._trades[sym].append((
+        self._trades[sym][side].append((
             trade["qty"],
             trade["time"] / 1000.0,
             trade["price"],
+            side,
         ))
 
-        # Cooldown check — avoid time.time() if no prior alert
-        last = self._last_alert.get(sym)
+        # Cooldown check
+        cooldown_key = f"{sym}:{side}"
+        last = self._last_alert.get(cooldown_key)
         if last is not None:
             if time.time() - last < ALERT_COOLDOWN:
                 return
 
-        self._detect(sym)
+        self._detect(sym, side)
 
     def cleanup(self):
         now = time.time()
         cutoff = now - TRADE_TTL
 
         for sym in list(self._trades.keys()):
-            trades = self._trades[sym]
-            # Fast path: if all trades are fresh, skip rebuild
-            if trades and trades[0][_TS] > cutoff:
-                # Maybe only tail needs trimming — check last
-                if trades[-1][_TS] > cutoff:
-                    continue
-            # Rebuild keeping only fresh trades
-            fresh = [t for t in trades if t[_TS] > cutoff]
-            if fresh:
-                self._trades[sym] = fresh
-            else:
-                del self._trades[sym]
+            for side in ("BUY", "SELL"):
+                trades = self._trades[sym][side]
+                # Fast path: if all trades are fresh, skip rebuild
+                if trades and trades[0][_TS] > cutoff:
+                    if trades[-1][_TS] > cutoff:
+                        continue
+                # Rebuild keeping only fresh trades
+                fresh = [t for t in trades if t[_TS] > cutoff]
+                if fresh:
+                    self._trades[sym][side] = fresh
+                else:
+                    self._trades[sym][side] = []
 
-        for sym in list(self._seen_clusters.keys()):
-            if sym not in self._last_alert or now - self._last_alert[sym] > 300:
-                self._seen_clusters[sym].clear()
+        for key in list(self._seen_clusters.keys()):
+            sym = key.split(":")[0] if ":" in key else key
+            if sym not in self._last_alert or now - self._last_alert.get(key, 0) > 300:
+                self._seen_clusters[key].clear()
 
     def get_stats(self) -> str:
         return f"Trades: {self._trade_count} | Alerts: {self._alert_count}"
 
-    def _detect(self, sym: str):
-        trades = self._trades.get(sym)
+    def _detect(self, sym: str, side: str):
+        trades = self._trades.get(sym, {}).get(side, [])
         if not trades or len(trades) < MIN_REPEATS:
             return
 
@@ -89,26 +94,34 @@ class Detector:
             if avg_usd < MIN_PRINT_USD:
                 continue
 
-            if avg_usd < 500:
-                strength = "🟢 СЛАБЫЙ"
-            elif avg_usd <= 1500:
-                strength = "🟡 СРЕДНИЙ"
+            if side == "BUY":
+                if avg_usd < 500:
+                    strength = "🟢 СЛАБЫЙ BUY"
+                elif avg_usd <= 1500:
+                    strength = "🟡 СРЕДНИЙ BUY"
+                else:
+                    strength = "🔴 СИЛЬНЫЙ BUY"
             else:
-                strength = "🔴 СИЛЬНЫЙ"
+                if avg_usd < 500:
+                    strength = "🟢 СЛАБЫЙ SELL"
+                elif avg_usd <= 1500:
+                    strength = "🟡 СРЕДНИЙ SELL"
+                else:
+                    strength = "🔴 СИЛЬНЫЙ SELL"
 
-            cluster_key = round(avg_qty, 4)
+            cluster_key = f"{side}:{round(avg_qty, 4)}"
 
             if cluster_key in self._seen_clusters[sym]:
                 continue
 
             self._seen_clusters[sym].add(cluster_key)
-            self._last_alert[sym] = time.time()
+            self._last_alert[f"{sym}:{side}"] = time.time()
             self._alert_count += 1
-            self._fire_alert(sym, count, avg_qty, avg_interval, first_price,
-                             strength, avg_usd, first_time)
+            self._fire_alert(sym, side, count, avg_qty, avg_interval,
+                             first_price, strength, avg_usd, first_time)
             return
 
-    def _fire_alert(self, sym: str, count: int, avg_qty: float,
+    def _fire_alert(self, sym: str, side: str, count: int, avg_qty: float,
                     avg_interval: float, first_price: float,
                     strength: str, avg_usd: float, signal_time_sec: float):
         ts = time.strftime("%H:%M:%S")
@@ -118,8 +131,9 @@ class Detector:
 
         print(
             f"\n{'='*50}\n"
-            f"🔴 ALGO DETECTED  [{ts}]  {strength}\n"
+            f"{'🔴' if side == 'SELL' else '🟢'} ALGO DETECTED  [{ts}]  {strength}\n"
             f"   Symbol:    {sym}\n"
+            f"   Side:      {side}\n"
             f"   Price:     {first_price}\n"
             f"   Prints:    {count}\n"
             f"   Avg Size:  {qty_str}\n"
@@ -135,7 +149,7 @@ class Detector:
                 loop = asyncio.get_event_loop()
                 if loop.is_running():
                     loop.create_task(
-                        self._on_alert(sym, count, avg_qty, avg_interval,
+                        self._on_alert(sym, side, count, avg_qty, avg_interval,
                                        first_price, strength, avg_usd,
                                        signal_time_sec)
                     )

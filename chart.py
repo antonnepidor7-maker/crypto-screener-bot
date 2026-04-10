@@ -72,6 +72,7 @@ def generate_signal_chart(
     first_price: float,
     strength: str,
     avg_usd: float,
+    side: str = "BUY",
     dpi: int = 1,  # unused, kept for API compat
 ) -> io.BytesIO:
     """Генерирует PNG-график с отметкой включения. Возвращает BytesIO."""
@@ -171,13 +172,17 @@ def generate_signal_chart(
         )
 
     # ── Подсветка момента сигнала (вертикальная полоса) ──
+    is_sell = side == "SELL"
+    band_color = (239, 80, 80, 35) if is_sell else (0, 255, 136, 35)
+    arrow_color = DOWN if is_sell else GREEN
+
     sx = candle_x(signal_idx)
     overlay = Image.new("RGBA", (W, H), (0, 0, 0, 0))
     odraw = ImageDraw.Draw(overlay)
     band_w = candle_w * 3
     odraw.rectangle(
         [(sx - band_w, chart_top), (sx + band_w, vol_bot)],
-        fill=(0, 255, 136, 35),
+        fill=band_color,
     )
     img = Image.alpha_composite(img.convert("RGBA"), overlay).convert("RGB")
     draw = ImageDraw.Draw(img)
@@ -189,17 +194,30 @@ def generate_signal_chart(
         draw.line([(dx, ey), (dx + 4, ey)], fill=GOLD, width=1)
     draw.text((W - PAD_RIGHT - 80, ey - 14), _format_price(first_price), fill=GOLD, font=font_sm)
 
-    # ── Стрелка ▲ под сигнальной свечой ──
-    arrow_y = price_y(klines[signal_idx]["low"]) + 10
+    # ── Стрелка под сигнальной свечой ──
     arrow_size = 10
-    draw.polygon(
-        [
-            (sx, arrow_y + arrow_size),
-            (sx - arrow_size, arrow_y - arrow_size // 2),
-            (sx + arrow_size, arrow_y - arrow_size // 2),
-        ],
-        fill=GREEN,
-    )
+    if is_sell:
+        # ▼ стрелка вниз — над свечой
+        arrow_y = price_y(klines[signal_idx]["high"]) - 10
+        draw.polygon(
+            [
+                (sx, arrow_y - arrow_size),
+                (sx - arrow_size, arrow_y + arrow_size // 2),
+                (sx + arrow_size, arrow_y + arrow_size // 2),
+            ],
+            fill=arrow_color,
+        )
+    else:
+        # ▲ стрелка вверх — под свечой
+        arrow_y = price_y(klines[signal_idx]["low"]) + 10
+        draw.polygon(
+            [
+                (sx, arrow_y + arrow_size),
+                (sx - arrow_size, arrow_y - arrow_size // 2),
+                (sx + arrow_size, arrow_y - arrow_size // 2),
+            ],
+            fill=arrow_color,
+        )
 
     # ── Заголовок ──
     signal_dt = datetime.fromtimestamp(signal_time_sec, tz=timezone.utc)
