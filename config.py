@@ -65,7 +65,8 @@ INTERVAL_MEDIUM_MAX = 1.0    # 0.5s - 1.0s = MEDIUM
 # > 1.0s = WEAK
 
 # Local Xray SOCKS5 proxy (bypasses Binance geo-block)
-BINANCE_PROXY = "socks5://127.0.0.1:10808"
+# Set to "" to disable proxy (if Binance is accessible directly)
+BINANCE_PROXY = os.environ.get("BINANCE_PROXY", "socks5://127.0.0.1:10808")
 
 # Max symbols per WebSocket connection
 MAX_STREAMS_PER_CONN = 1024
@@ -119,3 +120,22 @@ def load_auth_users() -> dict[str, str]:
 
 # Loaded on import — restart app after editing users.json
 AUTH_USERS: dict[str, str] = load_auth_users()
+
+
+def reload_auth_users() -> dict[str, str]:
+    """Reload users from disk. Returns updated dict."""
+    global AUTH_USERS
+    AUTH_USERS = load_auth_users()
+    return AUTH_USERS
+
+
+def save_auth_users(users: dict[str, str]) -> None:
+    """Save users dict to users.json and reload."""
+    global AUTH_USERS
+    with open(AUTH_USERS_FILE, "w") as f:
+        json.dump(users, f, indent=4, ensure_ascii=False)
+    AUTH_USERS = users.copy()
+
+
+# Admin logins (can manage users via /admin panel)
+ADMIN_LOGINS = {"admin"}

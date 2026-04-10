@@ -1,0 +1,19 @@
+version: "3.8"
+
+services:
+  crypto-screener:
+    build: .
+    container_name: crypto-screener
+    restart: unless-stopped
+    environment:
+      - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN}
+      - MARKET_TYPE=${MARKET_TYPE:-both}
+    volumes:
+      # Persist users.json and user_prefs.json outside container
+      - ./users.json:/app/users.json
+      - ./user_prefs.json:/app/user_prefs.json
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
